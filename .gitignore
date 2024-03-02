@@ -1,5 +1,5 @@
 **/__pycache__/
-datasets
+datasets/
 EVD.zip
 homogr.zip
 bark.tar.gz

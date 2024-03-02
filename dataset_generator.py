@@ -11,7 +11,7 @@ from tqdm import tqdm
 from algorithms.core.evaluation import calc_diagonal_distance
 
 
-def create_evd_dataset(input_dir='EVD', output_dir='datasets/evd/evd'):
+def create_evd_dataset(input_dir='sources/EVD', output_dir='datasets/evd/evd'):
     h_dir = input_dir + '/h'
     img1_dir = input_dir + '/1'
     img2_dir = input_dir + '/2'
@@ -42,7 +42,7 @@ def create_evd_dataset(input_dir='EVD', output_dir='datasets/evd/evd'):
         shutil.copy2(H_path, directory + '/H.txt')
 
 
-def create_homogr_dataset(input_dir='homogr', output_dir='datasets/homogr/homogr'):
+def create_homogr_dataset(input_dir='sources/homogr', output_dir='datasets/homogr/homogr'):
 
     def read_H_from_mat(path):
         # e.g. path = 'adam_vpts.mat'
@@ -92,7 +92,7 @@ def create_homogr_dataset(input_dir='homogr', output_dir='datasets/homogr/homogr
         np.savetxt(directory + '/H.txt', H)
 
 
-def create_oxford_datasets(input_dir='oxford', output_main_dir='datasets', datasets=None):
+def create_oxford_datasets(input_dir='sources/oxford', output_main_dir='datasets', datasets=None):
     # Note: This function doesn't take output_dir as an argument. 
     # Instead, it uses output_main_dir and creates a subdirectory for each dataset.
 
@@ -340,7 +340,7 @@ def create_oxford_datasets(input_dir='oxford', output_main_dir='datasets', datas
                         copy_files(img1_no, img2_no, input_directory, output_directory)
 
 
-def create_oxford_auto_dataset(img_pair_count=10, perturbation_coefficient=0.3, noise_std=2, confirmed=False, seed=0, input_dir='oxford', output_dir='datasets/oxford-auto'):
+def create_oxford_auto_dataset(img_pair_count=10, perturbation_coefficient=0.3, noise_std=2, confirmed=False, seed=0, input_dir='sources/oxford', output_dir='datasets/oxford-auto'):
     # 48 x img_pair_count image pairs will be generated.
 
     # random.seed(seed)
