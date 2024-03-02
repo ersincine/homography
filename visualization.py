@@ -1,33 +1,9 @@
 import os
-import numpy as np
+
 import cv2 as cv
+import numpy as np
 
-
-def visualize(img1, img2, H):
-    # Note: Depending on the direction, you may need to use np.linalg.inv(H) instead of H.
-
-    h1, w1 = img1.shape[:2]
-    corners1 = [[0, 0], [w1, 0], [w1, h1], [0, h1]]
-    corners2 = np.int32(cv.perspectiveTransform(np.float32([corners1]), H)[0])
-    img2 = cv.polylines(img2, [corners2], True, (0, 0, 255), 2)
-
-    # Semi-transparent red
-    mask = np.zeros(img2.shape, dtype=np.uint8)
-    mask = cv.fillPoly(mask, [corners2], (0, 0, 255))
-    img2 = cv.addWeighted(mask, 0.3, img2, 0.7, 0)
-
-    # Solve height difference
-    h2, w2 = img2.shape[:2]
-    if h1 > h2:
-        img2 = np.vstack((img2, np.zeros((h1 - h2, w2, 3), dtype=np.uint8) + 255))
-    elif h1 < h2:
-        img1 = np.vstack((img1, np.zeros((h2 - h1, w1, 3), dtype=np.uint8) + 255))
-
-    img = np.hstack((img1, img2))
-    cv.namedWindow('img', cv.WINDOW_NORMAL)
-    cv.setWindowProperty('img', cv.WND_PROP_FULLSCREEN, cv.WINDOW_FULLSCREEN)
-    cv.imshow('img', img)
-    cv.waitKey(0)
+from utils.vision.opencv.visualization import visualize_homography
 
 
 def visualize_dataset(dataset_dir):
@@ -51,7 +27,7 @@ def visualize_dataset(dataset_dir):
         img2 = cv.imread(img2_path)
         assert img1 is not None
         assert img2 is not None
-        visualize(img1, img2, H)
+        visualize_homography(img1, img2, H)
 
 
 if __name__ == '__main__':
