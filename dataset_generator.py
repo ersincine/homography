@@ -495,7 +495,7 @@ def create_oxford_auto_dataset(img_pair_count=10, perturbation_coefficient=0.3, 
                 os.makedirs(f'{path}/{name_orig_img}-{idx}', exist_ok=True)
                 cv.imwrite(f'{path}/{name_orig_img}-{idx}/0.png', warped0)
                 cv.imwrite(f'{path}/{name_orig_img}-{idx}/1.png', warped1)
-                np.savetxt(f'{path}/{name_orig_img}-{idx}/H', H)
+                np.savetxt(f'{path}/{name_orig_img}-{idx}/H.txt', H)
 
                 """
                 os.makedirs(f'{path_extra}/{name_orig_img}-{idx}', exist_ok=True)
