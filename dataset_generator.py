@@ -1,14 +1,22 @@
 import math
 import os
+import random
 import shutil
 from pathlib import Path
 
 import cv2 as cv
+import kornia
+import kornia.constants
 import numpy as np
 import scipy.io
+import torch
 from tqdm import tqdm
 
 from algorithms.core.evaluation import calc_diagonal_distance
+from homography.my_random_homography_generator import (
+    get_warped_image_with_random_homography,
+)
+from homography.random_homography_generator import generate_image_pair
 
 
 def _quadrilateral_area(a, b, c, d) -> float:
@@ -573,68 +581,14 @@ def create_oxford_auto_dataset(
     # random.seed(seed)
     np.random.seed(seed)
 
-    def get_warped_image_with_random_homography(img, max_perturbation, magic_number):
-
-        height, width = img.shape[:2]
-        while True:
-            pts = np.int32([(0, 0), (width, 0), (width, height), (0, height)])
-            perturbed_pts = pts + np.random.randint(
-                -max_perturbation, max_perturbation + 1, pts.shape
-            )
-
-            H = cv.getPerspectiveTransform(np.float32(pts), np.float32(perturbed_pts))
-
-            # Find second least y in perturbed_pts (Üstteki 2 noktadan daha altta olan), but it should not be less than 0.
-            min_y = max(np.sort(perturbed_pts[:, 1])[1], 0)
-            # Find second greatest y in perturbed_pts (Altta 2 noktadan daha üstte olan), but it should not be greater than height.
-            max_y = min(np.sort(perturbed_pts[:, 1])[-2], height)
-            # Find second least x in perturbed_pts (Soldaki 2 noktadan daha sağda olan), but it should not be less than 0.
-            min_x = max(np.sort(perturbed_pts[:, 0])[1], 0)
-            # Find second greatest x in perturbed_pts (Sağdaki 2 noktadan daha solda olan), but it should not be greater than width.
-            max_x = min(np.sort(perturbed_pts[:, 0])[-2], width)
-
-            if min_x == max_x or min_y == max_y:
-                continue
-
-            assert min_x < max_x
-            assert min_y < max_y
-
-            warped = cv.warpPerspective(
-                img, H, (img.shape[1], img.shape[0]), flags=cv.INTER_CUBIC
-            )
-            warped = warped[min_y:max_y, min_x:max_x]
-            H = cv.getPerspectiveTransform(
-                np.float32(pts), np.float32(perturbed_pts - np.float32([min_x, min_y]))
-            )
-
-            new_height, new_width = warped.shape[:2]
-            if (
-                new_height < height * magic_number or new_width < width * magic_number
-            ):  # Magic number!
-                continue
-
-            if new_height >= new_width:
-                continue
-
-            # TODO: Burası önceden yoktu. auto'yu bozabilir...
-            detector = cv.SIFT_create(contrastThreshold=-10000, edgeThreshold=-10000)
-            kp = list(detector.detect(warped))
-            if len(kp) < 1000:
-                continue
-
-            # Resize warped keeping its aspect ratio to match either width or height
-            # if new_height / height > new_width / width:
-            #    warped = cv.resize(warped, (int(width * new_height / height), height), interpolation=cv.INTER_CUBIC)
-            #    H = ...
-            # else:
-            #    warped = cv.resize(warped, (width, int(height * new_width / width)), interpolation=cv.INTER_CUBIC)
-            #    H = ...
-            return warped, H
-
     if not confirmed:
         input("'Enter' to generate a new dataset. (Previous one will be deleted!)")
 
     scenes = [scene for scene in os.listdir(input_dir)]
+
+    # sahneleri sıralamak lazım!!! (tekrarlanabilirlik)
+    scenes.sort()
+
     img_orig_no_list = list(range(1, 7))
 
     for scene in tqdm(scenes):
@@ -705,6 +659,13 @@ def create_oxford_auto_dataset(
                 warped1, H1 = get_warped_image_with_random_homography(
                     img1, max_perturbation, magic_number=0.7
                 )
+
+                # warped0, H0 = get_warped_image_with_random_homography(
+                #     img0, max_perturbation, magic_number=0.7
+                # )
+                # warped1, H1 = get_warped_image_with_random_homography(
+                #     img1, max_perturbation, magic_number=0.7
+                # )
                 # image_utils.show_image(image_utils.side_by_side(img, warped1, warped2), str(i))
 
                 H = H1 @ np.linalg.inv(H0)  # From warped0 to warped1
@@ -765,66 +726,9 @@ def create_homogr_auto_dataset(
     # random.seed(seed)
     np.random.seed(seed)
 
-    def get_warped_image_with_random_homography(img, max_perturbation, magic_number):
-
-        height, width = img.shape[:2]
-        while True:
-            pts = np.int32([(0, 0), (width, 0), (width, height), (0, height)])
-            perturbed_pts = pts + np.random.randint(
-                -max_perturbation, max_perturbation + 1, pts.shape
-            )
-
-            H = cv.getPerspectiveTransform(np.float32(pts), np.float32(perturbed_pts))
-
-            # Find second least y in perturbed_pts (Üstteki 2 noktadan daha altta olan), but it should not be less than 0.
-            min_y = max(np.sort(perturbed_pts[:, 1])[1], 0)
-            # Find second greatest y in perturbed_pts (Altta 2 noktadan daha üstte olan), but it should not be greater than height.
-            max_y = min(np.sort(perturbed_pts[:, 1])[-2], height)
-            # Find second least x in perturbed_pts (Soldaki 2 noktadan daha sağda olan), but it should not be less than 0.
-            min_x = max(np.sort(perturbed_pts[:, 0])[1], 0)
-            # Find second greatest x in perturbed_pts (Sağdaki 2 noktadan daha solda olan), but it should not be greater than width.
-            max_x = min(np.sort(perturbed_pts[:, 0])[-2], width)
-
-            if min_x == max_x or min_y == max_y:
-                continue
-
-            assert min_x < max_x
-            assert min_y < max_y
-
-            warped = cv.warpPerspective(
-                img, H, (img.shape[1], img.shape[0]), flags=cv.INTER_CUBIC
-            )
-            warped = warped[min_y:max_y, min_x:max_x]
-            H = cv.getPerspectiveTransform(
-                np.float32(pts), np.float32(perturbed_pts - np.float32([min_x, min_y]))
-            )
-
-            new_height, new_width = warped.shape[:2]
-            if (
-                new_height < height * magic_number or new_width < width * magic_number
-            ):  # Magic number!
-                continue
-
-            if new_height >= new_width:
-                continue
-
-            # TODO: Burası önceden yoktu. auto'yu bozabilir...
-            detector = cv.SIFT_create(contrastThreshold=-10000, edgeThreshold=-10000)
-            kp = list(detector.detect(warped))
-            if len(kp) < 1000:
-                continue
-
-            # Resize warped keeping its aspect ratio to match either width or height
-            # if new_height / height > new_width / width:
-            #    warped = cv.resize(warped, (int(width * new_height / height), height), interpolation=cv.INTER_CUBIC)
-            #    H = ...
-            # else:
-            #    warped = cv.resize(warped, (width, int(height * new_width / width)), interpolation=cv.INTER_CUBIC)
-            #    H = ...
-            return warped, H
-
     if not confirmed:
         input("'Enter' to generate a new dataset. (Previous one will be deleted!)")
+        # FIXME TODO: Tam olarak silme gerçekleşmiyor...
 
     scenes = [
         file.replace("_vpts.mat", "")
@@ -832,13 +736,21 @@ def create_homogr_auto_dataset(
         if file.endswith("_vpts.mat")
     ]
 
+    # sahneleri sıralamak lazım!!! (tekrarlanabilirlik)
+    scenes.sort()
+
     for scene in tqdm(scenes):
 
-        if scene == "WhiteBoard":  # İki imgenin boyutları çok farklı birbirinden...
-            continue
+        # if (
+        #     scene == "WhiteBoard"
+        # ):  # WhiteBoard'un B'si dikey olduğu için testi geçmiyor. Testi değiştirmek lazım sonra. Yataysa sonuç yatay, dikeyse sonuç dikey olmalı, kareyse fark etmez.
+        #     continue
 
         for img_letter in ("A", "B"):
             name_orig_img = scene + img_letter  # e.g. adamB
+
+            print(name_orig_img)
+
             img_path = f"{input_dir}/{scene}{img_letter}.png"
 
             if not os.path.exists(img_path):
@@ -955,6 +867,381 @@ def create_homogr_auto_dataset(
             # Mesela konveks olmalıdır. Ama bu bile yeterli değil.
 
 
+# # Apply random projective transformation
+# def _apply_random_projective_transformation(image):
+#     # Define the parameters for the random projective transformation
+#     resample = "bicubic"
+#     projective_transform = kornia.augmentation.RandomPerspective(
+#         p=1.0, sampling_method="basic", distortion_scale=0.5, resample=resample
+#     )
+#     transformed_image = projective_transform(image)
+#     params = (
+#         projective_transform._params
+#     )  # Yukarıda kullanılan rastgele parametrelerin aynısına ulaşalım.
+#     flags = {
+#         "align_corners": False,
+#         "resample": kornia.constants.Resample.get(resample),
+#     }
+#     H = projective_transform.compute_transformation(image, params=params, flags=flags)
+#     print("First:", H)
+#     return transformed_image, H
+
+
+# def _largest_inscribed_rectangle_and_H(binary_image):
+#     contours, _ = cv.findContours(
+#         binary_image, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
+#     )
+
+#     # Step 3: Compute the convex hull for each contour
+#     hulls = [cv.convexHull(contour) for contour in contours]
+
+#     if len(hulls) != 1:
+#         print(f"{len(hulls)=}")
+#         for hull in hulls:
+#             print(hull.shape)
+#         return None, None, None, None
+#     # assert len(hulls) == 1
+#     # 1'den fazla gelirse ne yapmak gerektiğinden emin değilim. O yüzden atlayayım direkt.
+#     # TODO Atlamadan yapsak, fazla elemanı seçsek falan?
+
+#     hull = hulls[0]
+
+#     # https://stackoverflow.com/a/10262750/2772829
+#     # We only need 4 corners
+
+#     while len(hull) > 4:
+#         smallest_distance = float("inf")
+#         smallest_index = None
+#         for i in range(len(hull)):
+#             point = hull[i]
+#             point_a = hull[(i - 1) % len(hull)]
+#             point_b = hull[(i + 1) % len(hull)]
+#             # point's distance to line AB
+#             distance = np.abs(
+#                 np.cross(point_b - point_a, point - point_a)
+#             ) / np.linalg.norm(point_b - point_a)
+#             if distance < smallest_distance:
+#                 smallest_distance = distance
+#                 smallest_index = i
+
+#         hull = np.delete(hull, smallest_index, axis=0)
+
+#     print(len(hull))
+
+#     # get all x coords and sort
+#     x_coords = [point[0][0] for point in hull]
+#     x_coords.sort()
+
+#     # get all y coords and sort
+#     y_coords = [point[0][1] for point in hull]
+#     y_coords.sort()
+
+#     x = x_coords[1]  # second smallest
+#     x_end = x_coords[-2]  # second largest
+#     y = y_coords[1]  # second smallest
+#     y_end = y_coords[-2]  # second largest
+
+#     w = x_end - x
+#     h = y_end - y
+
+#     assert w > 0
+#     assert h > 0
+
+#     # x, y, w, h = cv.boundingRect(hull)  # Bounding box bulacak olsak köşeleri 4'e indirgemeye de gerek yok.
+
+#     width = binary_image.shape[1]
+#     height = binary_image.shape[0]
+
+#     # Find homography that moves the corners to this rectangle
+#     src_pts = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
+#     dst_pts = np.float32(
+#         hull
+#     )  # Sıraları rastgele, sol üst köşeyi başa getirelim. Saat yönünde hesaplandığı için src_pts ile uyumlu gerisi de
+#     dst_pts = dst_pts.reshape(4, 2)  # (4, 1, 2) -> (4, 2)
+
+#     topleft = np.argmin([np.linalg.norm(pt - np.array([0, 0])) for pt in hull])
+#     dst_pts = np.roll(dst_pts, -topleft, axis=0)
+#     # dst_pts2 = np.float32([hull[topleft], hull[(topleft+1) % len(hull)], hull[(topleft+2) % len(hull)], hull[(topleft+3) % len(hull)]])
+
+#     # # assert dst_pts and dst_pts2 are equal
+#     # assert np.all(dst_pts == dst_pts2)
+
+#     # the point closest top topleft corner (0, 0)
+#     # topleft = np.argmin([np.linalg.norm(pt - src_pts[0]) for pt in hull])
+#     # # dts = np.roll(hull, -topleft, axis=0)
+#     # topright = np.argmin([np.linalg.norm(pt - src_pts[1]) for pt in hull])
+#     # bottomright = np.argmin([np.linalg.norm(pt - src_pts[2]) for pt in hull])
+#     # bottomleft = np.argmin([np.linalg.norm(pt - src_pts[3]) for pt in hull])
+#     # assert len({topleft, topright, bottomright, bottomleft}) == 4
+#     # dst_pts = np.float32(
+#     #     [hull[topleft], hull[topright], hull[bottomright], hull[bottomleft]]
+#     # )
+
+#     # move dst_pts to left by x pixels, and to up by y pixels
+#     print(src_pts.shape)
+#     print(dst_pts.shape)
+#     dst_pts[:, 0] -= x
+#     dst_pts[:, 1] -= y
+
+#     H = cv.getPerspectiveTransform(src_pts, dst_pts)
+
+#     print("Second:", H)
+
+#     return x, y, w, h  # , H
+
+
+# def convert(img, target_type_min, target_type_max, target_type):
+#     imin = img.min()
+#     imax = img.max()
+#     print(imin, imax)
+
+#     a = (target_type_max - target_type_min) / (imax - imin)
+#     b = target_type_max - a * imax
+#     new_img = (a * img + b).astype(target_type)
+#     return new_img
+
+
+# def _crop_to_content(transformed_image, H):
+#     gray = cv.cvtColor(transformed_image, cv.COLOR_RGB2GRAY)
+#     gray = (np.clip(gray, 0, 1) * 255).astype(np.uint8)
+#     # gray = convert(gray, 0, 255, np.uint8)
+
+#     _, binary = cv.threshold(gray, 1, 255, cv.THRESH_BINARY)
+#     # x, y, w, h, H = _largest_inscribed_rectangle_and_H(binary)  # bounding box değil
+#     x, y, w, h = _largest_inscribed_rectangle_and_H(binary)  # bounding box değil
+
+#     if x is None:
+#         return transformed_image, H
+
+#     # cropped_image = transformed_image[y : y + h, x : x + w, :]
+#     cropped_image = transformed_image[:, :, :]
+
+#     # return torch.from_numpy(cropped_image).permute(2, 0, 1).unsqueeze(0), H
+#     return cropped_image, H
+
+
+# # Visualize the original and transformed images
+# def visualize_images(original_image, transformed_image, cropped_image):
+#     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+#     axes[0].imshow(original_image.squeeze().permute(1, 2, 0).cpu().numpy())
+#     axes[0].set_title("Original Image")
+#     axes[0].axis('off')
+
+#     axes[1].imshow(transformed_image.squeeze().permute(1, 2, 0).cpu().numpy())
+#     axes[1].set_title("Transformed Image")
+#     axes[1].axis('off')
+
+#     axes[2].imshow(cropped_image.squeeze().permute(1, 2, 0).cpu().numpy())
+#     axes[2].set_title("Cropped Image")
+#     axes[2].axis('off')
+
+#     plt.show()
+
+
+def create_homogr_random_dataset(
+    img_pair_count=10,
+    distortion_scale=0.5,
+    scale=4.0,
+    confirmed=False,
+    seed=0,
+    input_dir="sources/homogr",
+    output_dir="datasets/homogr-random",
+):
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    if not confirmed:
+        input("'Enter' to generate a new dataset. (Previous one will be deleted!)")
+        # FIXME TODO: Tam olarak silme gerçekleşmiyor...
+
+    scenes = [
+        file.replace("_vpts.mat", "")
+        for file in os.listdir(input_dir)
+        if file.endswith("_vpts.mat")
+    ]
+
+    # sahneleri sıralamak lazım!!! (tekrarlanabilirlik)
+    scenes.sort()
+
+    for scene in tqdm(scenes):
+
+        for img_letter in ("A", "B"):
+            name_orig_img = scene + img_letter  # e.g. adamB
+
+            print(name_orig_img)
+
+            img_path = f"{input_dir}/{scene}{img_letter}.png"
+
+            if not os.path.exists(img_path):
+                img_path = img_path.replace(".png", ".jpg")
+                assert os.path.exists(img_path)
+
+            # img = cv.imread(img_path, cv.IMREAD_GRAYSCALE)
+
+            # name_orig_img = 'graff1'
+            assert (
+                "-" not in name_orig_img
+            )  # Çünkü mesela 'graff-1 olmamalı. Onun yerine 'graff1' vb. olmalı. Auto olmayanlarda hep tire var!
+            path = output_dir + "/" + name_orig_img
+            # path_extra = 'dataset/all'
+
+            """
+            # Delete existing image pairs from all (graff1-0, graff1-1, ...)
+            all_img_pair_names = os.listdir(path_extra)
+            relevant_img_pair_names = [name for name in all_img_pair_names if name.startswith(name_orig_img + '-')]
+            for img_pair_name in relevant_img_pair_names:
+                shutil.rmtree(f'{path_extra}/{img_pair_name}')
+            """
+
+            # Delete existing image pairs from auto/graff1
+            if os.path.exists(path):
+                shutil.rmtree(path)
+
+            # TODO Aşağıdaki kodu etkinleştir. Delete relevant cache files from _caches
+            """
+            main_cache_directory = '_caches/extract_features_from_image'
+            if os.path.exists(main_cache_directory):
+                cache_dirs = os.listdir(main_cache_directory)
+                cache_dirs = [cache_dir for cache_dir in cache_dirs if os.path.isdir(f'{main_cache_directory}/{cache_dir}')]
+                for cache_dir in cache_dirs:
+                    files = os.listdir(f'{main_cache_directory}/{cache_dir}')
+                    data_files = [file for file in files if file.endswith('.data')]
+                    python_files = [file for file in files if file.endswith('.py')]
+                    assert len(data_files) + len(python_files) == len(files)
+                    for python_file in python_files:
+                        with open(f'{main_cache_directory}/{cache_dir}/{python_file}', 'r') as f:
+                            code = f.read()
+                            if f'img_path=\'dataset/all/{name_orig_img}-' in code:
+                                os.remove(f'{main_cache_directory}/{cache_dir}/{python_file}')
+                                os.remove(f'{main_cache_directory}/{cache_dir}/{python_file[:-3]}')
+            """
+
+            # TODO: Memories'den silmek iyi bir fikir gibi.
+
+            # image = kornia.io.load_image(
+            #     img_path, kornia.io.ImageLoadType.RGB32, device="cpu"
+            # )
+
+            image = cv.imread(img_path, cv.IMREAD_COLOR)
+            if scale != 1:
+                image = cv.resize(
+                    image,
+                    (round(image.shape[1] * scale), round(image.shape[0] * scale)),
+                    cv.INTER_CUBIC,
+                )
+
+            print("image:", image.shape, image.dtype)
+
+            # Generate new image pairs
+            for idx in range(img_pair_count):
+
+                warped0, warped1, H = generate_image_pair(
+                    image, distortion_scale=distortion_scale
+                )
+
+                # while True:
+                #     transformed_image0, H0 = _apply_random_projective_transformation(
+                #         image
+                #     )
+                #     transformed_image0 = (
+                #         transformed_image0.squeeze().permute(1, 2, 0).cpu().numpy()
+                #     )  # squeeze sayesinde (1, 3, 640, 480) yerine (3, 640, 480). permute sayesinde channels en sonda.
+                #     # print(transformed_image0.squeeze()[0, 50, 60])
+                #     # print(transformed_image0[50, 60, 0])
+                #     cropped_transformed_image0, _ = _crop_to_content(
+                #         transformed_image0, H0
+                #     )
+                #     if H0 is not None:
+                #         break
+
+                # while True:
+                #     transformed_image1, H1 = _apply_random_projective_transformation(
+                #         image
+                #     )
+                #     transformed_image1 = (
+                #         transformed_image1.squeeze().permute(1, 2, 0).cpu().numpy()
+                #     )  # squeeze sayesinde (1, 3, 640, 480) yerine (3, 640, 480). permute sayesinde channels en sonda.
+                #     # print(transformed_image0.squeeze()[0, 50, 60])
+                #     # print(transformed_image0[50, 60, 0])
+                #     cropped_transformed_image1, _ = _crop_to_content(
+                #         transformed_image1, H1
+                #     )
+                #     if H1 is not None:
+                #         break
+
+                # H0 = H0.squeeze().cpu().numpy()
+                # H1 = H1.squeeze().cpu().numpy()
+
+                # H = H1 @ np.linalg.inv(H0)  # From 0 to 1
+
+                # visualize_images(image, transformed_image, cropped_image)
+
+                # # # Visualize H by unwarping the transformed image
+                # unwarped_image = cv.warpPerspective(transformed_image.squeeze().permute(1, 2, 0).cpu().numpy(), np.linalg.inv(H), (transformed_image.shape[3], transformed_image.shape[2]))
+                # print(unwarped_image.dtype, unwarped_image.shape)
+                # plt.imshow(unwarped_image)
+                # plt.title("Unwarped Image")
+                # plt.axis('off')
+                # plt.show()
+
+                # save transformed image
+                # transformed_image_np = transformed_image.squeeze().permute(1, 2, 0).cpu().numpy()
+                # transformed_image_np = (transformed_image_np * 255).astype(np.uint8)
+                # transformed_image_np = cv.cvtColor(transformed_image_np, cv.COLOR_RGB2BGR)
+                # cv.imwrite(f'outputs/transformed_{i}.png', transformed_image_np)
+
+                # cropped_transformed_image0 = cv.cvtColor(
+                #     cropped_transformed_image0, cv.COLOR_RGB2GRAY  # COLOR_RGB2BGR
+                # )
+                # cropped_transformed_image1 = cv.cvtColor(
+                #     cropped_transformed_image1, cv.COLOR_RGB2GRAY  #  COLOR_RGB2BGR
+                # )
+
+                # # print(cropped_transformed_image0.dtype)
+                # warped0 = (np.clip(cropped_transformed_image0, 0, 1) * 255).astype(
+                #     np.uint8
+                # )
+                # warped1 = (np.clip(cropped_transformed_image1, 0, 1) * 255).astype(
+                #     np.uint8
+                # )
+
+                # cropped_image_np0 = cropped_transformed_image0.squeeze().permute(1, 2, 0).cpu().numpy()
+                # cropped_image_np0 = (cropped_image_np0 * 255).astype(np.uint8)
+                # cropped_image_np0 = cv.cvtColor(cropped_image_np0, cv.COLOR_RGB2BGR)
+
+                # cv.imwrite(f'outputs/{i}/0.png', cropped_image_np0)
+
+                # cropped_image_np1 = cropped_transformed_image1.squeeze().permute(1, 2, 0).cpu().numpy()
+                # cropped_image_np1 = (cropped_image_np1 * 255).astype(np.uint8)
+                # cropped_image_np1 = cv.cvtColor(cropped_image_np1, cv.COLOR_RGB2BGR)
+
+                # cv.imwrite(f'outputs/{i}/1.png', cropped_image_np1)
+
+                # # print(unwarped_image.dtype, unwarped_image.shape)
+                # #plt.imshow(cropped_image_np0)
+                # plt.imshow(cropped_transformed_image0)
+                # plt.title("Image 0")
+                # plt.axis('off')
+                # plt.show()
+
+                # #print(cropped_image_np0.shape)
+                # #img1 = cv.warpPerspective(cropped_image_np1, np.linalg.inv(H), (cropped_image_np1.shape[1], cropped_image_np1.shape[0]))
+                # img1 = cv.warpPerspective(cropped_transformed_image1, np.linalg.inv(H), (cropped_transformed_image1.shape[1], cropped_transformed_image1.shape[0]))
+                # # print(unwarped_image.dtype, unwarped_image.shape)
+                # plt.imshow(img1)
+                # plt.title("Image 1")
+                # plt.axis('off')
+                # plt.show()
+
+                os.makedirs(f"{path}/{name_orig_img}-{idx}", exist_ok=True)
+                cv.imwrite(f"{path}/{name_orig_img}-{idx}/0.png", warped0)
+                cv.imwrite(f"{path}/{name_orig_img}-{idx}/1.png", warped1)
+                np.savetxt(f"{path}/{name_orig_img}-{idx}/H.txt", H)
+
+
 if __name__ == "__main__":
     # Oxford: https://www.robots.ox.ac.uk/~vgg/research/affine/
     # homogr: https://cmp.felk.cvut.cz/data/geometry2view/index.xhtml
@@ -964,5 +1251,6 @@ if __name__ == "__main__":
     create_homogr_dataset()
     create_homogr_dataset_by_categories()
     create_homogr_auto_dataset()
+    create_homogr_random_dataset()  # auto ile aynı mantık ama Kornia kullanarak.
     create_oxford_datasets()
     create_oxford_auto_dataset()
