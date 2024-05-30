@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import random
@@ -578,16 +579,15 @@ def create_oxford_auto_dataset(
 ):
     # 48 x img_pair_count image pairs will be generated.
 
-    # random.seed(seed)
     np.random.seed(seed)
 
     if not confirmed:
         input("'Enter' to generate a new dataset. (Previous one will be deleted!)")
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
 
     scenes = [scene for scene in os.listdir(input_dir)]
-
-    # sahneleri sıralamak lazım!!! (tekrarlanabilirlik)
-    scenes.sort()
+    scenes.sort()  # Tekrarlanabilirlik için
 
     img_orig_no_list = list(range(1, 7))
 
@@ -604,42 +604,8 @@ def create_oxford_auto_dataset(
                 * perturbation_coefficient
             )
             # name_orig_img = 'graff1'
-            assert (
-                "-" not in name_orig_img
-            )  # Çünkü mesela 'graff-1 olmamalı. Onun yerine 'graff1' vb. olmalı. Auto olmayanlarda hep tire var!
+            assert "-" not in name_orig_img
             path = output_dir + "/" + name_orig_img
-            # path_extra = 'dataset/all'
-
-            """
-            # Delete existing image pairs from all (graff1-0, graff1-1, ...)
-            all_img_pair_names = os.listdir(path_extra)
-            relevant_img_pair_names = [name for name in all_img_pair_names if name.startswith(name_orig_img + '-')]
-            for img_pair_name in relevant_img_pair_names:
-                shutil.rmtree(f'{path_extra}/{img_pair_name}')
-            """
-
-            # Delete existing image pairs from auto/graff1
-            if os.path.exists(path):
-                shutil.rmtree(path)
-
-            # TODO Aşağıdaki kodu etkinleştir. Delete relevant cache files from _caches
-            """
-            main_cache_directory = '_caches/extract_features_from_image'
-            if os.path.exists(main_cache_directory):
-                cache_dirs = os.listdir(main_cache_directory)
-                cache_dirs = [cache_dir for cache_dir in cache_dirs if os.path.isdir(f'{main_cache_directory}/{cache_dir}')]
-                for cache_dir in cache_dirs:
-                    files = os.listdir(f'{main_cache_directory}/{cache_dir}')
-                    data_files = [file for file in files if file.endswith('.data')]
-                    python_files = [file for file in files if file.endswith('.py')]
-                    assert len(data_files) + len(python_files) == len(files)
-                    for python_file in python_files:
-                        with open(f'{main_cache_directory}/{cache_dir}/{python_file}', 'r') as f:
-                            code = f.read()
-                            if f'img_path=\'dataset/all/{name_orig_img}-' in code:
-                                os.remove(f'{main_cache_directory}/{cache_dir}/{python_file}')
-                                os.remove(f'{main_cache_directory}/{cache_dir}/{python_file[:-3]}')
-            """
 
             # TODO: Memories'den silmek iyi bir fikir gibi.
 
@@ -659,23 +625,13 @@ def create_oxford_auto_dataset(
                 warped1, H1 = get_warped_image_with_random_homography(
                     img1, max_perturbation, magic_number=0.7
                 )
-
-                # warped0, H0 = get_warped_image_with_random_homography(
-                #     img0, max_perturbation, magic_number=0.7
-                # )
-                # warped1, H1 = get_warped_image_with_random_homography(
-                #     img1, max_perturbation, magic_number=0.7
-                # )
                 # image_utils.show_image(image_utils.side_by_side(img, warped1, warped2), str(i))
 
                 H = H1 @ np.linalg.inv(H0)  # From warped0 to warped1
-
-                # from tools.image_pair_explorer import explore_correct, explore_estimation
                 # explore_correct(warped0, warped1, H)
                 # explore_estimation(img0, img1)
 
                 # warped = cv.warpPerspective(warped1, H, (warped1.shape[1], warped1.shape[0]), flags=cv.INTER_CUBIC)
-
                 # warped1_height, warped1_width = warped1.shape[:2]
                 # rect = [
                 #    (0, 0),
@@ -683,31 +639,19 @@ def create_oxford_auto_dataset(
                 #    (warped1_width, warped1_height),
                 #    (0, warped1_height)
                 # ]
-
-                # Transform rect using H and OpenCV
                 # perturbed_rect = cv.perspectiveTransform(np.float32([rect]), H)[0]
-
                 # warped1 = cv.cvtColor(warped1, cv.COLOR_GRAY2BGR)
                 # warped2 = cv.cvtColor(warped2, cv.COLOR_GRAY2BGR)
                 # warped = cv.cvtColor(warped, cv.COLOR_GRAY2BGR)
-
                 # for pt in perturbed_rect:
                 #    pt = pt.astype(np.int32)
                 #    cv.circle(warped2, tuple(pt), 5, (0, 0, 255), -1)
-
                 # image_utils.show_image(image_utils.side_by_side(warped1, warped2, warped), str(i))
 
                 os.makedirs(f"{path}/{name_orig_img}-{idx}", exist_ok=True)
                 cv.imwrite(f"{path}/{name_orig_img}-{idx}/0.png", warped0)
                 cv.imwrite(f"{path}/{name_orig_img}-{idx}/1.png", warped1)
                 np.savetxt(f"{path}/{name_orig_img}-{idx}/H.txt", H)
-
-                """
-                os.makedirs(f'{path_extra}/{name_orig_img}-{idx}', exist_ok=True)
-                cv.imwrite(f'{path_extra}/{name_orig_img}-{idx}/0.png', warped0)
-                cv.imwrite(f'{path_extra}/{name_orig_img}-{idx}/1.png', warped1)
-                np.savetxt(f'{path_extra}/{name_orig_img}-{idx}/H', H)
-                """
 
             # FIXME Aslında perspective transform olmuyor. 4 nokta birbirinden bağımsız hareket edemez normalde!
             # Mesela konveks olmalıdır. Ama bu bile yeterli değil.
@@ -723,29 +667,21 @@ def create_homogr_auto_dataset(
     output_dir="datasets/homogr-auto",
 ):
 
-    # random.seed(seed)
     np.random.seed(seed)
 
     if not confirmed:
         input("'Enter' to generate a new dataset. (Previous one will be deleted!)")
-        # FIXME TODO: Tam olarak silme gerçekleşmiyor...
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
 
     scenes = [
         file.replace("_vpts.mat", "")
         for file in os.listdir(input_dir)
         if file.endswith("_vpts.mat")
     ]
-
-    # sahneleri sıralamak lazım!!! (tekrarlanabilirlik)
-    scenes.sort()
+    scenes.sort()  # Tekrarlanabilirlik için
 
     for scene in tqdm(scenes):
-
-        # if (
-        #     scene == "WhiteBoard"
-        # ):  # WhiteBoard'un B'si dikey olduğu için testi geçmiyor. Testi değiştirmek lazım sonra. Yataysa sonuç yatay, dikeyse sonuç dikey olmalı, kareyse fark etmez.
-        #     continue
-
         for img_letter in ("A", "B"):
             name_orig_img = scene + img_letter  # e.g. adamB
 
@@ -765,42 +701,8 @@ def create_homogr_auto_dataset(
                 * perturbation_coefficient
             )
             # name_orig_img = 'graff1'
-            assert (
-                "-" not in name_orig_img
-            )  # Çünkü mesela 'graff-1 olmamalı. Onun yerine 'graff1' vb. olmalı. Auto olmayanlarda hep tire var!
+            assert "-" not in name_orig_img
             path = output_dir + "/" + name_orig_img
-            # path_extra = 'dataset/all'
-
-            """
-            # Delete existing image pairs from all (graff1-0, graff1-1, ...)
-            all_img_pair_names = os.listdir(path_extra)
-            relevant_img_pair_names = [name for name in all_img_pair_names if name.startswith(name_orig_img + '-')]
-            for img_pair_name in relevant_img_pair_names:
-                shutil.rmtree(f'{path_extra}/{img_pair_name}')
-            """
-
-            # Delete existing image pairs from auto/graff1
-            if os.path.exists(path):
-                shutil.rmtree(path)
-
-            # TODO Aşağıdaki kodu etkinleştir. Delete relevant cache files from _caches
-            """
-            main_cache_directory = '_caches/extract_features_from_image'
-            if os.path.exists(main_cache_directory):
-                cache_dirs = os.listdir(main_cache_directory)
-                cache_dirs = [cache_dir for cache_dir in cache_dirs if os.path.isdir(f'{main_cache_directory}/{cache_dir}')]
-                for cache_dir in cache_dirs:
-                    files = os.listdir(f'{main_cache_directory}/{cache_dir}')
-                    data_files = [file for file in files if file.endswith('.data')]
-                    python_files = [file for file in files if file.endswith('.py')]
-                    assert len(data_files) + len(python_files) == len(files)
-                    for python_file in python_files:
-                        with open(f'{main_cache_directory}/{cache_dir}/{python_file}', 'r') as f:
-                            code = f.read()
-                            if f'img_path=\'dataset/all/{name_orig_img}-' in code:
-                                os.remove(f'{main_cache_directory}/{cache_dir}/{python_file}')
-                                os.remove(f'{main_cache_directory}/{cache_dir}/{python_file[:-3]}')
-            """
 
             # TODO: Memories'den silmek iyi bir fikir gibi.
 
@@ -823,13 +725,10 @@ def create_homogr_auto_dataset(
                 # image_utils.show_image(image_utils.side_by_side(img, warped1, warped2), str(i))
 
                 H = H1 @ np.linalg.inv(H0)  # From warped0 to warped1
-
-                # from tools.image_pair_explorer import explore_correct, explore_estimation
                 # explore_correct(warped0, warped1, H)
                 # explore_estimation(img0, img1)
 
                 # warped = cv.warpPerspective(warped1, H, (warped1.shape[1], warped1.shape[0]), flags=cv.INTER_CUBIC)
-
                 # warped1_height, warped1_width = warped1.shape[:2]
                 # rect = [
                 #    (0, 0),
@@ -837,18 +736,13 @@ def create_homogr_auto_dataset(
                 #    (warped1_width, warped1_height),
                 #    (0, warped1_height)
                 # ]
-
-                # Transform rect using H and OpenCV
                 # perturbed_rect = cv.perspectiveTransform(np.float32([rect]), H)[0]
-
                 # warped1 = cv.cvtColor(warped1, cv.COLOR_GRAY2BGR)
                 # warped2 = cv.cvtColor(warped2, cv.COLOR_GRAY2BGR)
                 # warped = cv.cvtColor(warped, cv.COLOR_GRAY2BGR)
-
                 # for pt in perturbed_rect:
                 #    pt = pt.astype(np.int32)
                 #    cv.circle(warped2, tuple(pt), 5, (0, 0, 255), -1)
-
                 # image_utils.show_image(image_utils.side_by_side(warped1, warped2, warped), str(i))
 
                 os.makedirs(f"{path}/{name_orig_img}-{idx}", exist_ok=True)
@@ -856,187 +750,8 @@ def create_homogr_auto_dataset(
                 cv.imwrite(f"{path}/{name_orig_img}-{idx}/1.png", warped1)
                 np.savetxt(f"{path}/{name_orig_img}-{idx}/H.txt", H)
 
-                """
-                os.makedirs(f'{path_extra}/{name_orig_img}-{idx}', exist_ok=True)
-                cv.imwrite(f'{path_extra}/{name_orig_img}-{idx}/0.png', warped0)
-                cv.imwrite(f'{path_extra}/{name_orig_img}-{idx}/1.png', warped1)
-                np.savetxt(f'{path_extra}/{name_orig_img}-{idx}/H', H)
-                """
-
             # FIXME Aslında perspective transform olmuyor. 4 nokta birbirinden bağımsız hareket edemez normalde!
             # Mesela konveks olmalıdır. Ama bu bile yeterli değil.
-
-
-# # Apply random projective transformation
-# def _apply_random_projective_transformation(image):
-#     # Define the parameters for the random projective transformation
-#     resample = "bicubic"
-#     projective_transform = kornia.augmentation.RandomPerspective(
-#         p=1.0, sampling_method="basic", distortion_scale=0.5, resample=resample
-#     )
-#     transformed_image = projective_transform(image)
-#     params = (
-#         projective_transform._params
-#     )  # Yukarıda kullanılan rastgele parametrelerin aynısına ulaşalım.
-#     flags = {
-#         "align_corners": False,
-#         "resample": kornia.constants.Resample.get(resample),
-#     }
-#     H = projective_transform.compute_transformation(image, params=params, flags=flags)
-#     print("First:", H)
-#     return transformed_image, H
-
-
-# def _largest_inscribed_rectangle_and_H(binary_image):
-#     contours, _ = cv.findContours(
-#         binary_image, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
-#     )
-
-#     # Step 3: Compute the convex hull for each contour
-#     hulls = [cv.convexHull(contour) for contour in contours]
-
-#     if len(hulls) != 1:
-#         print(f"{len(hulls)=}")
-#         for hull in hulls:
-#             print(hull.shape)
-#         return None, None, None, None
-#     # assert len(hulls) == 1
-#     # 1'den fazla gelirse ne yapmak gerektiğinden emin değilim. O yüzden atlayayım direkt.
-#     # TODO Atlamadan yapsak, fazla elemanı seçsek falan?
-
-#     hull = hulls[0]
-
-#     # https://stackoverflow.com/a/10262750/2772829
-#     # We only need 4 corners
-
-#     while len(hull) > 4:
-#         smallest_distance = float("inf")
-#         smallest_index = None
-#         for i in range(len(hull)):
-#             point = hull[i]
-#             point_a = hull[(i - 1) % len(hull)]
-#             point_b = hull[(i + 1) % len(hull)]
-#             # point's distance to line AB
-#             distance = np.abs(
-#                 np.cross(point_b - point_a, point - point_a)
-#             ) / np.linalg.norm(point_b - point_a)
-#             if distance < smallest_distance:
-#                 smallest_distance = distance
-#                 smallest_index = i
-
-#         hull = np.delete(hull, smallest_index, axis=0)
-
-#     print(len(hull))
-
-#     # get all x coords and sort
-#     x_coords = [point[0][0] for point in hull]
-#     x_coords.sort()
-
-#     # get all y coords and sort
-#     y_coords = [point[0][1] for point in hull]
-#     y_coords.sort()
-
-#     x = x_coords[1]  # second smallest
-#     x_end = x_coords[-2]  # second largest
-#     y = y_coords[1]  # second smallest
-#     y_end = y_coords[-2]  # second largest
-
-#     w = x_end - x
-#     h = y_end - y
-
-#     assert w > 0
-#     assert h > 0
-
-#     # x, y, w, h = cv.boundingRect(hull)  # Bounding box bulacak olsak köşeleri 4'e indirgemeye de gerek yok.
-
-#     width = binary_image.shape[1]
-#     height = binary_image.shape[0]
-
-#     # Find homography that moves the corners to this rectangle
-#     src_pts = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
-#     dst_pts = np.float32(
-#         hull
-#     )  # Sıraları rastgele, sol üst köşeyi başa getirelim. Saat yönünde hesaplandığı için src_pts ile uyumlu gerisi de
-#     dst_pts = dst_pts.reshape(4, 2)  # (4, 1, 2) -> (4, 2)
-
-#     topleft = np.argmin([np.linalg.norm(pt - np.array([0, 0])) for pt in hull])
-#     dst_pts = np.roll(dst_pts, -topleft, axis=0)
-#     # dst_pts2 = np.float32([hull[topleft], hull[(topleft+1) % len(hull)], hull[(topleft+2) % len(hull)], hull[(topleft+3) % len(hull)]])
-
-#     # # assert dst_pts and dst_pts2 are equal
-#     # assert np.all(dst_pts == dst_pts2)
-
-#     # the point closest top topleft corner (0, 0)
-#     # topleft = np.argmin([np.linalg.norm(pt - src_pts[0]) for pt in hull])
-#     # # dts = np.roll(hull, -topleft, axis=0)
-#     # topright = np.argmin([np.linalg.norm(pt - src_pts[1]) for pt in hull])
-#     # bottomright = np.argmin([np.linalg.norm(pt - src_pts[2]) for pt in hull])
-#     # bottomleft = np.argmin([np.linalg.norm(pt - src_pts[3]) for pt in hull])
-#     # assert len({topleft, topright, bottomright, bottomleft}) == 4
-#     # dst_pts = np.float32(
-#     #     [hull[topleft], hull[topright], hull[bottomright], hull[bottomleft]]
-#     # )
-
-#     # move dst_pts to left by x pixels, and to up by y pixels
-#     print(src_pts.shape)
-#     print(dst_pts.shape)
-#     dst_pts[:, 0] -= x
-#     dst_pts[:, 1] -= y
-
-#     H = cv.getPerspectiveTransform(src_pts, dst_pts)
-
-#     print("Second:", H)
-
-#     return x, y, w, h  # , H
-
-
-# def convert(img, target_type_min, target_type_max, target_type):
-#     imin = img.min()
-#     imax = img.max()
-#     print(imin, imax)
-
-#     a = (target_type_max - target_type_min) / (imax - imin)
-#     b = target_type_max - a * imax
-#     new_img = (a * img + b).astype(target_type)
-#     return new_img
-
-
-# def _crop_to_content(transformed_image, H):
-#     gray = cv.cvtColor(transformed_image, cv.COLOR_RGB2GRAY)
-#     gray = (np.clip(gray, 0, 1) * 255).astype(np.uint8)
-#     # gray = convert(gray, 0, 255, np.uint8)
-
-#     _, binary = cv.threshold(gray, 1, 255, cv.THRESH_BINARY)
-#     # x, y, w, h, H = _largest_inscribed_rectangle_and_H(binary)  # bounding box değil
-#     x, y, w, h = _largest_inscribed_rectangle_and_H(binary)  # bounding box değil
-
-#     if x is None:
-#         return transformed_image, H
-
-#     # cropped_image = transformed_image[y : y + h, x : x + w, :]
-#     cropped_image = transformed_image[:, :, :]
-
-#     # return torch.from_numpy(cropped_image).permute(2, 0, 1).unsqueeze(0), H
-#     return cropped_image, H
-
-
-# # Visualize the original and transformed images
-# def visualize_images(original_image, transformed_image, cropped_image):
-#     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-
-#     axes[0].imshow(original_image.squeeze().permute(1, 2, 0).cpu().numpy())
-#     axes[0].set_title("Original Image")
-#     axes[0].axis('off')
-
-#     axes[1].imshow(transformed_image.squeeze().permute(1, 2, 0).cpu().numpy())
-#     axes[1].set_title("Transformed Image")
-#     axes[1].axis('off')
-
-#     axes[2].imshow(cropped_image.squeeze().permute(1, 2, 0).cpu().numpy())
-#     axes[2].set_title("Cropped Image")
-#     axes[2].axis('off')
-
-#     plt.show()
 
 
 def create_homogr_random_dataset(
@@ -1049,22 +764,20 @@ def create_homogr_random_dataset(
     output_dir="datasets/homogr-random",
 ):
 
-    random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
     if not confirmed:
         input("'Enter' to generate a new dataset. (Previous one will be deleted!)")
-        # FIXME TODO: Tam olarak silme gerçekleşmiyor...
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
 
     scenes = [
         file.replace("_vpts.mat", "")
         for file in os.listdir(input_dir)
         if file.endswith("_vpts.mat")
     ]
-
-    # sahneleri sıralamak lazım!!! (tekrarlanabilirlik)
-    scenes.sort()
+    scenes.sort()  # Tekrarlanabilirlik için
 
     for scene in tqdm(scenes):
 
@@ -1082,42 +795,8 @@ def create_homogr_random_dataset(
             # img = cv.imread(img_path, cv.IMREAD_GRAYSCALE)
 
             # name_orig_img = 'graff1'
-            assert (
-                "-" not in name_orig_img
-            )  # Çünkü mesela 'graff-1 olmamalı. Onun yerine 'graff1' vb. olmalı. Auto olmayanlarda hep tire var!
+            assert "-" not in name_orig_img
             path = output_dir + "/" + name_orig_img
-            # path_extra = 'dataset/all'
-
-            """
-            # Delete existing image pairs from all (graff1-0, graff1-1, ...)
-            all_img_pair_names = os.listdir(path_extra)
-            relevant_img_pair_names = [name for name in all_img_pair_names if name.startswith(name_orig_img + '-')]
-            for img_pair_name in relevant_img_pair_names:
-                shutil.rmtree(f'{path_extra}/{img_pair_name}')
-            """
-
-            # Delete existing image pairs from auto/graff1
-            if os.path.exists(path):
-                shutil.rmtree(path)
-
-            # TODO Aşağıdaki kodu etkinleştir. Delete relevant cache files from _caches
-            """
-            main_cache_directory = '_caches/extract_features_from_image'
-            if os.path.exists(main_cache_directory):
-                cache_dirs = os.listdir(main_cache_directory)
-                cache_dirs = [cache_dir for cache_dir in cache_dirs if os.path.isdir(f'{main_cache_directory}/{cache_dir}')]
-                for cache_dir in cache_dirs:
-                    files = os.listdir(f'{main_cache_directory}/{cache_dir}')
-                    data_files = [file for file in files if file.endswith('.data')]
-                    python_files = [file for file in files if file.endswith('.py')]
-                    assert len(data_files) + len(python_files) == len(files)
-                    for python_file in python_files:
-                        with open(f'{main_cache_directory}/{cache_dir}/{python_file}', 'r') as f:
-                            code = f.read()
-                            if f'img_path=\'dataset/all/{name_orig_img}-' in code:
-                                os.remove(f'{main_cache_directory}/{cache_dir}/{python_file}')
-                                os.remove(f'{main_cache_directory}/{cache_dir}/{python_file[:-3]}')
-            """
 
             # TODO: Memories'den silmek iyi bir fikir gibi.
 
@@ -1240,6 +919,70 @@ def create_homogr_random_dataset(
                 cv.imwrite(f"{path}/{name_orig_img}-{idx}/0.png", warped0)
                 cv.imwrite(f"{path}/{name_orig_img}-{idx}/1.png", warped1)
                 np.savetxt(f"{path}/{name_orig_img}-{idx}/H.txt", H)
+
+
+# TODO split.json'ı farklı bir yerden indirdim; çünkü orijinal adres çalışmıyor. Sonra orijinaliyle karşılaştır.
+
+
+def read_hpatches_sequences_splits(path="sources/hpatches-sequences/splits.json"):
+    with open(path, "r") as f:
+        splits = json.load(f)
+
+    print("a_train:", len(splits["a"]["train"]))  # 76
+    print("a_test:", len(splits["a"]["test"]))  # 40
+    print("b_train:", len(splits["b"]["train"]))  # 76
+    print("b_test:", len(splits["b"]["test"]))  # 40
+    print("c_train:", len(splits["c"]["train"]))  # 76
+    print("c_test:", len(splits["c"]["test"]))  # 40
+    # Total train: 228
+    # Total test: 120
+
+    print("illum_test", len(splits["illum"]["test"]))  # 57
+    print("view_test", len(splits["view"]["test"]))  # 59
+    # Total test: 116
+
+    # assert illum_test and view_test have no common elements
+    assert len(set(splits["illum"]["test"]) & set(splits["view"]["test"])) == 0
+
+    print("full_test", len(splits["full"]["test"]))  # 116
+
+    # assert illum_test and view_test collectively equal to full_test
+    assert set(splits["illum"]["test"]) | set(splits["view"]["test"]) == set(
+        splits["full"]["test"]
+    )
+
+    return splits["illum"]["test"], splits["view"]["test"]
+
+
+def create_hpatches_sequences_dataset(
+    input_dir="sources/hpatches-sequences", output_dir="datasets/hpatches-sequences"
+):
+
+    # TODO: Bütün pairleri ve simetrik bir şekilde hesaplayabiliriz Oxford benzeri şekilde.
+    # TODO: easy, hard, tough şeklinde ayrı ayrı datasetler oluşturabiliriz. (JSON olarak verilmiş.)
+
+    illum, view = read_hpatches_sequences_splits(input_dir + "/splits.json")
+
+    scenes = sorted(
+        [scene for scene in os.listdir(input_dir) if not scene.endswith(".json")]
+    )
+
+    for scene in scenes:
+        img1 = cv.imread(f"{input_dir}/{scene}/1.ppm")
+        imgs = [cv.imread(f"{input_dir}/{scene}/{no}.ppm") for no in range(2, 7)]
+        Hs = [np.loadtxt(f"{input_dir}/{scene}/H_1_{no}") for no in range(2, 7)]
+
+        if scene in illum:
+            category = "illum"
+        else:
+            assert scene in view
+            category = "view"
+
+        for idx, (img, H) in enumerate(zip(imgs, Hs), start=2):
+            os.makedirs(f"{output_dir}/{category}/{scene}-1-{idx}", exist_ok=True)
+            cv.imwrite(f"{output_dir}/{category}/{scene}-1-{idx}/0.png", img1)
+            cv.imwrite(f"{output_dir}/{category}/{scene}-1-{idx}/1.png", img)
+            np.savetxt(f"{output_dir}/{category}/{scene}-1-{idx}/H.txt", H)
 
 
 if __name__ == "__main__":

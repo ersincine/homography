@@ -37,9 +37,7 @@ def get_warped_image_with_random_homography(img, max_perturbation, magic_number)
         )
 
         new_height, new_width = warped.shape[:2]
-        if (
-            new_height < height * magic_number or new_width < width * magic_number
-        ):  # Magic number!
+        if new_height < height * magic_number or new_width < width * magic_number:
             continue
 
         if height > width:
@@ -50,18 +48,9 @@ def get_warped_image_with_random_homography(img, max_perturbation, magic_number)
             if new_height > new_width:
                 continue
 
-        # TODO: Burası önceden yoktu. auto'yu bozabilir...
         detector = cv.SIFT_create(contrastThreshold=-10000, edgeThreshold=-10000)
-        # detector = cv.SIFT_create()
         kp = list(detector.detect(warped))
         if len(kp) < 1000:
             continue
 
-        # Resize warped keeping its aspect ratio to match either width or height
-        # if new_height / height > new_width / width:
-        #    warped = cv.resize(warped, (int(width * new_height / height), height), interpolation=cv.INTER_CUBIC)
-        #    H = ...
-        # else:
-        #    warped = cv.resize(warped, (width, int(height * new_width / width)), interpolation=cv.INTER_CUBIC)
-        #    H = ...
         return warped, H
