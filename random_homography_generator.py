@@ -131,8 +131,20 @@ def apply_random_homography_and_crop(
 
 
 def generate_image_pair(
-    img: np.ndarray, distortion_scale=0.5, sampling_method="basic", resample="bicubic"
+    img: np.ndarray,
+    img2=None,
+    distortion_scale=0.5,
+    sampling_method="basic",
+    resample="bicubic",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    # There may be photometric transformations as well.
+    # If that is the case img2 should be passed.
+
+    if img2 is None:
+        img2 = img
+    else:
+        assert img.shape == img2.shape  # I am not sure if this is necessary.
 
     cropped_warped_img0, H0 = apply_random_homography_and_crop(
         img,
@@ -142,7 +154,7 @@ def generate_image_pair(
     )
 
     cropped_warped_img1, H1 = apply_random_homography_and_crop(
-        img,
+        img2,
         distortion_scale=distortion_scale,
         sampling_method=sampling_method,
         resample=resample,

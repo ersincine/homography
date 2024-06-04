@@ -958,8 +958,7 @@ def create_hpatches_sequences_dataset(
     input_dir="sources/hpatches-sequences", output_dir="datasets/hpatches-sequences"
 ):
 
-    # TODO: Bütün pairleri ve simetrik bir şekilde hesaplayabiliriz Oxford benzeri şekilde.
-    # TODO: easy, hard, tough şeklinde ayrı ayrı datasetler oluşturabiliriz. (JSON olarak verilmiş.)
+    # TODO: easy, hard, tough şeklinde ayrı ayrı datasetler oluşturabiliriz. (JSON olarak verilmiş.) -- Hayır bu rastgele çiftler...
 
     illum, view = read_hpatches_sequences_splits(input_dir + "/splits.json")
 
@@ -983,6 +982,86 @@ def create_hpatches_sequences_dataset(
             cv.imwrite(f"{output_dir}/{category}/{scene}-1-{idx}/0.png", img1)
             cv.imwrite(f"{output_dir}/{category}/{scene}-1-{idx}/1.png", img)
             np.savetxt(f"{output_dir}/{category}/{scene}-1-{idx}/H.txt", H)
+
+
+def create_hpatches_sequences_full_dataset(
+    input_dir="sources/hpatches-sequences",
+    output_dir="datasets/hpatches-sequences-full",
+):
+
+    # Bütün çiftlerin olduğu bir veri kümesi oluşturulacak.
+
+    def get_transformation(
+        dataset_path: Path, img1_no: int, img2_no: int
+    ) -> np.ndarray:
+        if img1_no == img2_no:
+            H = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+        elif img1_no == 1:
+            H = np.loadtxt(dataset_path / f"H_{img1_no}_{img2_no}")
+
+        elif img2_no == 1:
+            H_inverse = np.loadtxt(dataset_path / f"H_{img2_no}_{img1_no}")
+            H = np.linalg.inv(H_inverse)
+
+        elif img1_no < img2_no:
+            # e.g.
+            # H: 3->5
+            # A: 1->3
+            # B: 1->5
+            # B = H A, thus B inv(A) = H A inv(A) = H.
+            # B = A H değil de B = H A. Çünkü aslında önce A, sonra H olacak (fonksiyon çağırma gibi sağdan sola). A, 1'den bir yere götürecek, H de oradan alacak.
+            A = np.loadtxt(dataset_path / f"H_1_{img1_no}")
+            B = np.loadtxt(dataset_path / f"H_1_{img2_no}")
+            H = B @ np.linalg.inv(A)
+
+        else:
+            # e.g.
+            # H: 5->3
+            # A: 5->1
+            # B: 3->1
+            # A = B H
+            # Thus, inv(B) A = H
+            A = get_transformation(dataset_path, img1_no, 1)
+            B = get_transformation(dataset_path, img2_no, 1)
+            H = np.linalg.inv(B) @ A
+
+        return H
+
+    illum, view = read_hpatches_sequences_splits(input_dir + "/splits.json")
+
+    scenes = sorted(
+        [scene for scene in os.listdir(input_dir) if not scene.endswith(".json")]
+    )
+
+    for scene in scenes:
+        for img1_no in range(1, 7):
+            for img2_no in range(1, 7):
+
+                img1 = cv.imread(f"{input_dir}/{scene}/{img1_no}.ppm")
+                img2 = cv.imread(f"{input_dir}/{scene}/{img2_no}.ppm")
+
+                H = get_transformation(Path(input_dir) / scene, img1_no, img2_no)
+
+                if scene in illum:
+                    category = "illum"
+                else:
+                    assert scene in view
+                    category = "view"
+
+                os.makedirs(
+                    f"{output_dir}/{category}/{scene}-{img1_no}-{img2_no}",
+                    exist_ok=True,
+                )
+                cv.imwrite(
+                    f"{output_dir}/{category}/{scene}-{img1_no}-{img2_no}/0.png", img1
+                )
+                cv.imwrite(
+                    f"{output_dir}/{category}/{scene}-{img1_no}-{img2_no}/1.png", img2
+                )
+                np.savetxt(
+                    f"{output_dir}/{category}/{scene}-{img1_no}-{img2_no}/H.txt", H
+                )
 
 
 if __name__ == "__main__":
