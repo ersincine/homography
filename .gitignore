@@ -1,5 +1,6 @@
 **/__pycache__/
 datasets/
+upscaled_sources/
 EVD.zip
 homogr.zip
 bark.tar.gz

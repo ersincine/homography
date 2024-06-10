@@ -14,6 +14,10 @@ import torch
 from tqdm import tqdm
 
 from algorithms.core.evaluation import calc_diagonal_distance
+from homography.better_warping import (
+    generate_image_pair_by_warping,
+    get_random_homography,
+)
 from homography.my_random_homography_generator import (
     get_warped_image_with_random_homography,
 )
@@ -921,6 +925,351 @@ def create_homogr_random_dataset(
                 np.savetxt(f"{path}/{name_orig_img}-{idx}/H.txt", H)
 
 
+def create_homogr_random_dataset_with_and_without_accurate_warping(
+    img_pair_count=10,
+    distortion_scale=0.5,
+    sr_models=("RealESRGAN",),
+    sr_scales=(2, 4),
+    seed=0,
+    input_dir="sources/homogr",
+    output_main_dir="datasets",
+):
+
+    # IMPORTANT: create_homogr_random_dataset'te upscale ederek oluşturuyoruz.
+    # Burada öyle değil. Warp edilecek sadece.
+
+    # Not: İleride fotometrik değişikliklerle birleştirmek istersek generate_image_pair_by_warping
+    # fonksiyonuna ek bir imge (fotometrik olarka farklı hali) verilebiliyor!
+
+    # TODO FIXME Galiba upscaled_sources hiç önemli değil.
+    # Çünkü biz onlarla upscale etmeyeceğiz.
+    # Sadece normal warping vs. accurate warping yapacağız.
+
+    # datasets/homogr-random-{img_pair_count}-{distortion_scale}-{seed}-warped
+    # datasets/homogr-random-{img_pair_count}-{distortion_scale}-{seed}-accurately-warped-RealESRGAN-2
+    # datasets/homogr-random-{img_pair_count}-{distortion_scale}-{seed}-accurately-warped-RealESRGAN-4
+
+    # ------------------------------------------
+
+    scenes = [
+        file.replace("_vpts.mat", "")
+        for file in os.listdir(input_dir)
+        if file.endswith("_vpts.mat")
+    ]
+    scenes.sort()  # Tekrarlanabilirlik için
+
+    # Create warped images
+    output_dir = f"{output_main_dir}/homogr-random-{img_pair_count}-{distortion_scale}-{seed}-warped"
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    # TODO: Gerekirse diğer seed'leri ekle.
+
+    H0s = {
+        scene
+        + img_letter
+        + str(idx): get_random_homography(
+            Path(f"{input_dir}/{scene}{img_letter}.png"),
+            distortion_scale=distortion_scale,
+        )
+        for scene in scenes
+        for img_letter in ("A", "B")
+        for idx in range(img_pair_count)
+    }
+
+    H1s = {
+        scene
+        + img_letter
+        + str(idx): get_random_homography(
+            Path(f"{input_dir}/{scene}{img_letter}.png"),
+            distortion_scale=distortion_scale,
+        )
+        for scene in scenes
+        for img_letter in ("A", "B")
+        for idx in range(img_pair_count)
+    }
+
+    for scene in tqdm(scenes):
+        for img_letter in ("A", "B"):
+            name_orig_img = scene + img_letter  # e.g. adamB
+            img_path = f"{input_dir}/{scene}{img_letter}.png"
+
+            if not os.path.exists(img_path):
+                img_path = img_path.replace(".png", ".jpg")
+                assert os.path.exists(img_path)
+
+            assert "-" not in name_orig_img
+            # Generate new image pairs
+            for idx in range(img_pair_count):
+                H0 = H0s[name_orig_img + str(idx)]
+                H1 = H1s[name_orig_img + str(idx)]
+
+                warped0, warped1, H = generate_image_pair_by_warping(
+                    Path(img_path),
+                    H0,
+                    H1,
+                    is_accurate=False,
+                    method_for_warping="bicubic",
+                    method_for_downscaling="bicubic",  # This doesn't matter, there won't be downscaling.
+                )
+                os.makedirs(
+                    f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}", exist_ok=True
+                )
+                cv.imwrite(
+                    f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/0.png", warped0
+                )
+                cv.imwrite(
+                    f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/1.png", warped1
+                )
+                np.savetxt(
+                    f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/H.txt", H
+                )
+
+    # Now create accurately warped images
+    for sr_model in sr_models:
+        for sr_scale in sr_scales:
+            output_dir = (
+                output_main_dir
+                + f"/homogr-random-{img_pair_count}-{distortion_scale}-{seed}-accurately-warped-{sr_model}-{sr_scale}"
+            )
+
+            if os.path.exists(output_dir):
+                shutil.rmtree(output_dir)
+
+            for scene in tqdm(scenes):
+                for img_letter in ("A", "B"):
+                    name_orig_img = scene + img_letter  # e.g. adamB
+                    img_path = f"{input_dir}/{scene}{img_letter}.png"
+                    assert "sources/homogr" in img_path
+
+                    def path_transformer(
+                        path: Path, sr_model: str, scale_factor: int
+                    ) -> Path:
+                        assert isinstance(path, Path)
+                        new_path = str(path).replace(
+                            "sources/homogr",
+                            f"superresolved_sources/homogr/{sr_model}/x{scale_factor}",
+                        )
+                        return Path(new_path)
+
+                    if not os.path.exists(img_path):
+                        img_path = img_path.replace(".png", ".jpg")
+                        assert os.path.exists(img_path)
+
+                    assert "-" not in name_orig_img
+                    # Generate new image pairs
+                    for idx in range(img_pair_count):
+                        H0 = H0s[name_orig_img + str(idx)]
+                        H1 = H1s[name_orig_img + str(idx)]
+
+                        warped0, warped1, H = generate_image_pair_by_warping(
+                            Path(img_path),
+                            H0,
+                            H1,
+                            is_accurate=True,
+                            sr_model_if_accurate=sr_model,
+                            scale_factor_if_accurate=sr_scale,
+                            method_for_warping="bicubic",
+                            method_for_downscaling="bicubic",  # This matters!
+                            path_transformer_if_accurate=path_transformer,
+                        )
+                        os.makedirs(
+                            f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}",
+                            exist_ok=True,
+                        )
+                        cv.imwrite(
+                            f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/0.png",
+                            warped0,
+                        )
+                        cv.imwrite(
+                            f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/1.png",
+                            warped1,
+                        )
+                        np.savetxt(
+                            f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/H.txt",
+                            H,
+                        )
+
+
+def create_homogr_random_dataset_with_and_without_accurate_warping_save_upscaled(
+    img_pair_count=10,
+    distortion_scale=0.5,
+    sr_models=("RealESRGAN",),
+    scale=2,
+    seed=0,
+    input_dir="sources/homogr",
+    output_main_dir="datasets",
+):
+
+    # Not: Bir üstteki fonksiyondan farkı sonucu upscale ederek kaydediyor olması.
+    # SR kullanımında upscale etmiyoruz, zaten upscale, sadece downscale etmemiş oluyoruz.
+
+    scenes = [
+        file.replace("_vpts.mat", "")
+        for file in os.listdir(input_dir)
+        if file.endswith("_vpts.mat")
+    ]
+    scenes.sort()  # Tekrarlanabilirlik için
+
+    # Create warped images
+    output_dir = f"{output_main_dir}/homogr-random-{img_pair_count}-{distortion_scale}-{seed}-scale{scale}-warped"
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    # TODO: Gerekirse diğer seed'leri ekle.
+
+    H0s = {
+        scene
+        + img_letter
+        + str(idx): get_random_homography(
+            Path(f"{input_dir}/{scene}{img_letter}.png"),
+            distortion_scale=distortion_scale,
+        )
+        for scene in scenes
+        for img_letter in ("A", "B")
+        for idx in range(img_pair_count)
+    }
+
+    H1s = {
+        scene
+        + img_letter
+        + str(idx): get_random_homography(
+            Path(f"{input_dir}/{scene}{img_letter}.png"),
+            distortion_scale=distortion_scale,
+        )
+        for scene in scenes
+        for img_letter in ("A", "B")
+        for idx in range(img_pair_count)
+    }
+
+    for scene in tqdm(scenes):
+        for img_letter in ("A", "B"):
+            name_orig_img = scene + img_letter  # e.g. adamB
+            img_path = f"{input_dir}/{scene}{img_letter}.png"
+
+            if not os.path.exists(img_path):
+                img_path = img_path.replace(".png", ".jpg")
+                assert os.path.exists(img_path)
+
+            assert "-" not in name_orig_img
+            # Generate new image pairs
+            for idx in range(img_pair_count):
+                H0 = H0s[name_orig_img + str(idx)]
+                H1 = H1s[name_orig_img + str(idx)]
+
+                warped0, warped1, H = generate_image_pair_by_warping(
+                    Path(img_path),
+                    H0,
+                    H1,
+                    is_accurate=False,
+                    method_for_warping="bicubic",
+                    # method_for_downscaling doesn't matter, there won't be downscaling.
+                )
+
+                # upscale warped0 using cv.resize by scale
+                warped0 = cv.resize(
+                    warped0,
+                    (round(warped0.shape[1] * scale), round(warped0.shape[0] * scale)),
+                    cv.INTER_CUBIC,
+                )
+
+                warped1 = cv.resize(
+                    warped1,
+                    (round(warped1.shape[1] * scale), round(warped1.shape[0] * scale)),
+                    cv.INTER_CUBIC,
+                )
+
+                U = np.float32([[scale, 0, 0], [0, scale, 0], [0, 0, 1]])
+                # Sadece warped0 büyütülseydi:
+                # H = H @ np.linalg.inv(U)
+
+                H = U @ H @ np.linalg.inv(U)
+
+                os.makedirs(
+                    f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}", exist_ok=True
+                )
+                cv.imwrite(
+                    f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/0.png", warped0
+                )
+                cv.imwrite(
+                    f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/1.png", warped1
+                )
+                np.savetxt(
+                    f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/H.txt", H
+                )
+
+    # Now create accurately warped images
+    for sr_model in sr_models:
+
+        # Not: Scale ne ise SR scale de o olsun, path'te 2 defa geçiyor...
+        output_dir = (
+            output_main_dir
+            + f"/homogr-random-{img_pair_count}-{distortion_scale}-{seed}-scale{scale}-accurately-warped-{sr_model}-{scale}"
+        )
+
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+
+        for scene in tqdm(scenes):
+            for img_letter in ("A", "B"):
+                name_orig_img = scene + img_letter  # e.g. adamB
+                img_path = f"{input_dir}/{scene}{img_letter}.png"
+                assert "sources/homogr" in img_path
+
+                def path_transformer(
+                    path: Path, sr_model: str, scale_factor: int
+                ) -> Path:
+                    assert isinstance(path, Path)
+                    new_path = str(path).replace(
+                        "sources/homogr",
+                        f"superresolved_sources/homogr/{sr_model}/x{scale_factor}",
+                    )
+                    return Path(new_path)
+
+                if not os.path.exists(img_path):
+                    img_path = img_path.replace(".png", ".jpg")
+                    assert os.path.exists(img_path)
+
+                assert "-" not in name_orig_img
+                # Generate new image pairs
+                for idx in range(img_pair_count):
+                    H0 = H0s[name_orig_img + str(idx)]
+                    H1 = H1s[name_orig_img + str(idx)]
+
+                    warped0, warped1, H = generate_image_pair_by_warping(
+                        Path(img_path),
+                        H0,
+                        H1,
+                        is_accurate=True,
+                        sr_model_if_accurate=sr_model,
+                        scale_factor_if_accurate=scale,
+                        method_for_warping="bicubic",
+                        # method_for_downscaling doesn't matter, there won't be downscaling.
+                        path_transformer_if_accurate=path_transformer,
+                        downscale_before_returning_if_accurate=False,
+                    )
+                    os.makedirs(
+                        f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}",
+                        exist_ok=True,
+                    )
+                    cv.imwrite(
+                        f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/0.png",
+                        warped0,
+                    )
+                    cv.imwrite(
+                        f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/1.png",
+                        warped1,
+                    )
+                    np.savetxt(
+                        f"{output_dir}/{name_orig_img}/{name_orig_img}-{idx}/H.txt",
+                        H,
+                    )
+
+
 # TODO split.json'ı farklı bir yerden indirdim; çünkü orijinal adres çalışmıyor. Sonra orijinaliyle karşılaştır.
 
 
@@ -973,9 +1322,13 @@ def create_hpatches_sequences_dataset(
 
         if scene in illum:
             category = "illum"
+            assert scene.startswith("i_")
+            # Üstteki satırı sonradan fark ettim ve ekledim. Direkt buradan anlaşılabilir aslında.
         else:
             assert scene in view
             category = "view"
+            assert scene.startswith("v_")
+            # Üstteki satırı sonradan fark ettim ve ekledim. Direkt buradan anlaşılabilir aslında.
 
         for idx, (img, H) in enumerate(zip(imgs, Hs), start=2):
             os.makedirs(f"{output_dir}/{category}/{scene}-1-{idx}", exist_ok=True)
@@ -1061,6 +1414,358 @@ def create_hpatches_sequences_full_dataset(
                 )
                 np.savetxt(
                     f"{output_dir}/{category}/{scene}-{img1_no}-{img2_no}/H.txt", H
+                )
+
+
+def create_hpatches_sequences_random_datasets_from_small_with_illumination_changes(
+    img_pair_count_per_scene=20,
+    distortion_scale=0.3,
+    seed=0,
+    sr_models=("BSRGAN",),
+    sr_scales=(2,),
+    input_dir="sources/hpatches-sequences",
+    output_main_dir="datasets",
+):
+
+    # Yani küçük olanları seçiyorum (_inspection_image_resolutions.py)
+    # Bunların hepsi i_ ile başlıyor yani illumination farkı var.
+    # Her imge çifti için aynı olmayan rastgele 2 tanesini seçiyorum.
+    # Bir normal warping ile bir de accurate warping ile yapıyorum.
+
+    scenes_with_small_images = sorted(
+        [
+            "i_village",
+            "i_fog",
+            "i_gonnenberg",
+            "i_fruits",
+            "i_nuts",
+            "i_toy",
+            "i_bologna",
+            "i_fenis",
+            "i_parking",
+        ]
+    )
+
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    # Create img_pair_count_by_scene * len(scenes_with_small_images) random homographies
+    H0s = {
+        scene: [
+            get_random_homography(
+                Path(
+                    f"{input_dir}/{scene}/1.ppm"
+                ),  # 1 yerine asıl numarayı kullanabiliriz ama hepsinin çözünürlükleri aynı zaten sahne içinde.
+                distortion_scale=distortion_scale,
+            )
+            for _ in range(img_pair_count_per_scene)
+        ]
+        for scene in scenes_with_small_images
+    }
+    H1s = {
+        scene: [
+            get_random_homography(
+                Path(
+                    f"{input_dir}/{scene}/1.ppm"
+                ),  # 1 yerine asıl numarayı kullanabiliriz ama hepsinin çözünürlükleri aynı zaten sahne içinde.
+                distortion_scale=distortion_scale,
+            )
+            for _ in range(img_pair_count_per_scene)
+        ]
+        for scene in scenes_with_small_images
+    }
+
+    # Create img_pair_count_by_scene * len(scenes_with_small_images) random image pairs (two different numbers in range(1, 7))
+    img_pair_idxs = {
+        scene: [
+            np.random.choice(range(1, 7), 2, replace=False)
+            for _ in range(img_pair_count_per_scene)
+        ]
+        for scene in scenes_with_small_images
+    }
+
+    output_dir = f"{output_main_dir}/hpatches-small-illum-random-{img_pair_count_per_scene}-{distortion_scale}-{seed}-warped"
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+
+    for scene in tqdm(scenes_with_small_images):
+        for no, img_pair_idx in enumerate(img_pair_idxs[scene]):
+            img0_idx, img1_idx = img_pair_idx
+            img0_path = f"{input_dir}/{scene}/{img0_idx}.ppm"
+            img1_path = f"{input_dir}/{scene}/{img1_idx}.ppm"
+            assert os.path.exists(img0_path), f"Image not found: {img0_path}"
+            assert os.path.exists(img1_path), f"Image not found: {img1_path}"
+
+            H0 = H0s[scene][no]
+            H1 = H1s[scene][no]
+
+            warped0, warped1, H = generate_image_pair_by_warping(
+                Path(img0_path),
+                H0,
+                H1,
+                is_accurate=False,
+                img2_path=Path(img1_path),
+                method_for_warping="bicubic",
+                method_for_downscaling="bicubic",  # This doesn't matter, there won't be downscaling.
+            )
+            os.makedirs(
+                f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}", exist_ok=True
+            )
+            cv.imwrite(
+                f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/0.png", warped0
+            )
+            cv.imwrite(
+                f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/1.png", warped1
+            )
+            np.savetxt(
+                f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/H.txt", H
+            )
+
+    # Now create accurately warped images
+    for sr_model in sr_models:
+        for sr_scale in sr_scales:
+            output_dir = (
+                output_main_dir
+                + f"/hpatches-small-illum-random--{img_pair_count_per_scene}-{distortion_scale}-{seed}-accurately-warped-{sr_model}-{sr_scale}"
+            )
+
+            if os.path.exists(output_dir):
+                shutil.rmtree(output_dir)
+
+            for scene in tqdm(scenes_with_small_images):
+                for no, img_pair_idx in enumerate(img_pair_idxs[scene]):
+                    img0_idx, img1_idx = img_pair_idx
+                    img0_path = f"{input_dir}/{scene}/{img0_idx}.ppm"
+                    img1_path = f"{input_dir}/{scene}/{img1_idx}.ppm"
+                    assert os.path.exists(img0_path), f"Image not found: {img0_path}"
+                    assert os.path.exists(img1_path), f"Image not found: {img1_path}"
+
+                    def path_transformer(
+                        path: Path, sr_model: str, scale_factor: int
+                    ) -> Path:
+                        assert isinstance(path, Path)
+                        new_path = str(path).replace(
+                            "sources/hpatches-sequences",
+                            f"superresolved_sources/hpatches-sequences/{sr_model}/x{scale_factor}",
+                        )
+                        return Path(new_path)
+
+                    H0 = H0s[scene][no]
+                    H1 = H1s[scene][no]
+
+                    warped0, warped1, H = generate_image_pair_by_warping(
+                        Path(img0_path),
+                        H0,
+                        H1,
+                        is_accurate=True,
+                        img2_path=Path(img1_path),
+                        sr_model_if_accurate=sr_model,
+                        scale_factor_if_accurate=sr_scale,
+                        method_for_warping="bicubic",
+                        method_for_downscaling="bicubic",  # This matters!
+                        path_transformer_if_accurate=path_transformer,
+                    )
+                    os.makedirs(
+                        f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}",
+                        exist_ok=True,
+                    )
+                    cv.imwrite(
+                        f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/0.png",
+                        warped0,
+                    )
+                    cv.imwrite(
+                        f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/1.png",
+                        warped1,
+                    )
+                    np.savetxt(
+                        f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/H.txt",
+                        H,
+                    )
+
+
+def create_hpatches_sequences_random_datasets_from_small_with_illumination_changes_save_upscaled(
+    img_pair_count_per_scene=20,
+    distortion_scale=0.3,
+    seed=0,
+    sr_models=("BSRGAN",),
+    scale=2,
+    input_dir="sources/hpatches-sequences",
+    output_main_dir="datasets",
+):
+
+    # Yani küçük olanları seçiyorum (_inspection_image_resolutions.py)
+    # Bunların hepsi i_ ile başlıyor yani illumination farkı var.
+    # Her imge çifti için aynı olmayan rastgele 2 tanesini seçiyorum.
+    # Bir normal warping ile bir de accurate warping ile yapıyorum.
+
+    scenes_with_small_images = sorted(
+        [
+            "i_village",
+            "i_fog",
+            "i_gonnenberg",
+            "i_fruits",
+            "i_nuts",
+            "i_toy",
+            "i_bologna",
+            "i_fenis",
+            "i_parking",
+        ]
+    )
+
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    # Create img_pair_count_by_scene * len(scenes_with_small_images) random homographies
+    H0s = {
+        scene: [
+            get_random_homography(
+                Path(
+                    f"{input_dir}/{scene}/1.ppm"
+                ),  # 1 yerine asıl numarayı kullanabiliriz ama hepsinin çözünürlükleri aynı zaten sahne içinde.
+                distortion_scale=distortion_scale,
+            )
+            for _ in range(img_pair_count_per_scene)
+        ]
+        for scene in scenes_with_small_images
+    }
+    H1s = {
+        scene: [
+            get_random_homography(
+                Path(
+                    f"{input_dir}/{scene}/1.ppm"
+                ),  # 1 yerine asıl numarayı kullanabiliriz ama hepsinin çözünürlükleri aynı zaten sahne içinde.
+                distortion_scale=distortion_scale,
+            )
+            for _ in range(img_pair_count_per_scene)
+        ]
+        for scene in scenes_with_small_images
+    }
+
+    # Create img_pair_count_by_scene * len(scenes_with_small_images) random image pairs (two different numbers in range(1, 7))
+    img_pair_idxs = {
+        scene: [
+            np.random.choice(range(1, 7), 2, replace=False)
+            for _ in range(img_pair_count_per_scene)
+        ]
+        for scene in scenes_with_small_images
+    }
+
+    output_dir = f"{output_main_dir}/hpatches-small-illum-random-{img_pair_count_per_scene}-{distortion_scale}-{seed}-scale{scale}-warped"
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+
+    for scene in tqdm(scenes_with_small_images):
+        for no, img_pair_idx in enumerate(img_pair_idxs[scene]):
+            img0_idx, img1_idx = img_pair_idx
+            img0_path = f"{input_dir}/{scene}/{img0_idx}.ppm"
+            img1_path = f"{input_dir}/{scene}/{img1_idx}.ppm"
+            assert os.path.exists(img0_path), f"Image not found: {img0_path}"
+            assert os.path.exists(img1_path), f"Image not found: {img1_path}"
+
+            H0 = H0s[scene][no]
+            H1 = H1s[scene][no]
+
+            warped0, warped1, H = generate_image_pair_by_warping(
+                Path(img0_path),
+                H0,
+                H1,
+                is_accurate=False,
+                img2_path=Path(img1_path),
+                method_for_warping="bicubic",
+                method_for_downscaling="bicubic",  # This doesn't matter, there won't be downscaling.
+            )
+
+            # upscale warped0 using cv.resize by scale
+            warped0 = cv.resize(
+                warped0,
+                (round(warped0.shape[1] * scale), round(warped0.shape[0] * scale)),
+                cv.INTER_CUBIC,
+            )
+
+            warped1 = cv.resize(
+                warped1,
+                (round(warped1.shape[1] * scale), round(warped1.shape[0] * scale)),
+                cv.INTER_CUBIC,
+            )
+
+            U = np.float32([[scale, 0, 0], [0, scale, 0], [0, 0, 1]])
+            # Sadece warped0 büyütülseydi:
+            # H = H @ np.linalg.inv(U)
+
+            H = U @ H @ np.linalg.inv(U)
+
+            os.makedirs(
+                f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}", exist_ok=True
+            )
+            cv.imwrite(
+                f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/0.png", warped0
+            )
+            cv.imwrite(
+                f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/1.png", warped1
+            )
+            np.savetxt(
+                f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/H.txt", H
+            )
+
+    # Now create accurately warped images
+    for sr_model in sr_models:
+        output_dir = (
+            output_main_dir
+            + f"/hpatches-small-illum-random--{img_pair_count_per_scene}-{distortion_scale}-{seed}-scale{scale}-accurately-warped-{sr_model}-{scale}"
+        )
+
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+
+        for scene in tqdm(scenes_with_small_images):
+            for no, img_pair_idx in enumerate(img_pair_idxs[scene]):
+                img0_idx, img1_idx = img_pair_idx
+                img0_path = f"{input_dir}/{scene}/{img0_idx}.ppm"
+                img1_path = f"{input_dir}/{scene}/{img1_idx}.ppm"
+                assert os.path.exists(img0_path), f"Image not found: {img0_path}"
+                assert os.path.exists(img1_path), f"Image not found: {img1_path}"
+
+                def path_transformer(
+                    path: Path, sr_model: str, scale_factor: int
+                ) -> Path:
+                    assert isinstance(path, Path)
+                    new_path = str(path).replace(
+                        "sources/hpatches-sequences",
+                        f"superresolved_sources/hpatches-sequences/{sr_model}/x{scale_factor}",
+                    )
+                    return Path(new_path)
+
+                H0 = H0s[scene][no]
+                H1 = H1s[scene][no]
+
+                warped0, warped1, H = generate_image_pair_by_warping(
+                    Path(img0_path),
+                    H0,
+                    H1,
+                    is_accurate=True,
+                    img2_path=Path(img1_path),
+                    sr_model_if_accurate=sr_model,
+                    scale_factor_if_accurate=scale,
+                    method_for_warping="bicubic",
+                    method_for_downscaling="bicubic",  # This matters!
+                    path_transformer_if_accurate=path_transformer,
+                    downscale_before_returning_if_accurate=False,
+                )
+                os.makedirs(
+                    f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}",
+                    exist_ok=True,
+                )
+                cv.imwrite(
+                    f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/0.png",
+                    warped0,
+                )
+                cv.imwrite(
+                    f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/1.png",
+                    warped1,
+                )
+                np.savetxt(
+                    f"{output_dir}/{scene}/{no}_from{img0_idx}and{img1_idx}/H.txt",
+                    H,
                 )
 
 

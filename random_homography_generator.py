@@ -50,7 +50,7 @@ def _H_from_kornia_to_opencv(H: torch.Tensor) -> np.ndarray:
     return H
 
 
-def _apply_random_homography(
+def apply_random_homography(
     img: np.ndarray, distortion_scale=0.5, sampling_method="basic", resample="bicubic"
 ) -> tuple[np.ndarray, np.ndarray]:
     img = _img_from_opencv_to_kornia(img)
@@ -77,7 +77,7 @@ def apply_random_homography_and_crop(
     img: np.ndarray, distortion_scale=0.5, sampling_method="basic", resample="bicubic"
 ) -> tuple[np.ndarray, np.ndarray]:
 
-    warped_img, H = _apply_random_homography(
+    warped_img, H = apply_random_homography(
         img,
         distortion_scale=distortion_scale,
         sampling_method=sampling_method,
